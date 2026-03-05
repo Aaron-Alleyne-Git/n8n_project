@@ -1,0 +1,61 @@
+version: "3.8"
+
+# ============================================================
+# N8N DevSecOps Starter - Local Development
+# ============================================================
+# SECURITY NOTES:
+#   - All secrets are read from .env (never hardcoded here)
+#   - N8N runs on localhost only (not exposed to 0.0.0.0)
+#   - Basic auth is ENABLED — change default credentials!
+#   - Data volume is local (not shared or cloud-synced)
+# ============================================================
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-devsecops
+    restart: unless-stopped
+
+    ports:
+      # Bind to localhost only — not accessible from external network
+      - "127.0.0.1:5678:5678"
+
+    environment:
+      # --- Core Config ---
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+
+      # --- Basic Auth (change these!) ---
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+
+      # --- Encryption Key for stored credentials ---
+      # Generate with: openssl rand -hex 32
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+
+      # --- Disable telemetry (optional, privacy preference) ---
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+
+      # --- Your workflow secrets (injected from .env) ---
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - GITHUB_REPO_OWNER=${GITHUB_REPO_OWNER}
+      - GITHUB_REPO_NAME=${GITHUB_REPO_NAME}
+
+    volumes:
+      # Persist N8N data (workflows, credentials, execution history)
+      - n8n_data:/home/node/.n8n
+
+    # Resource limits (good practice for local dev)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  n8n_data:
+    driver: local

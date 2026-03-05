@@ -1,0 +1,165 @@
+{
+  "name": "Security Advisory Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "node-schedule",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Triggers the workflow every 6 hours. Change interval in production based on SLA needs."
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/={{ $env.GITHUB_REPO_OWNER }}/={{ $env.GITHUB_REPO_NAME }}/security-advisories",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "headers": {
+            "values": [
+              {
+                "name": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "name": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              }
+            ]
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "node-github-fetch",
+      "name": "Fetch GitHub Advisories",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "notes": "Calls GitHub REST API to get security advisories. Auth token comes from environment variable — never hardcoded. Docs: https://docs.github.com/en/rest/security-advisories"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.severity }}",
+              "rightValue": "high",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.severity }}",
+              "rightValue": "critical",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        }
+      },
+      "id": "node-filter",
+      "name": "Filter: HIGH or CRITICAL Only",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "notes": "Only HIGH and CRITICAL advisories proceed. Low/medium are discarded here to reduce alert fatigue. Adjust thresholds based on your team's needs."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format each advisory into a clean Slack message object\nconst advisory = $input.item.json;\n\nconst severityEmoji = {\n  critical: '🚨',\n  high: '🔴',\n  medium: '🟡',\n  low: '🟢'\n};\n\nconst emoji = severityEmoji[advisory.severity?.toLowerCase()] || '⚠️';\n\nreturn {\n  json: {\n    severity: advisory.severity,\n    title: advisory.summary || 'No title',\n    cve_id: advisory.cve_id || 'N/A',\n    url: advisory.html_url || '',\n    published: advisory.published_at || 'Unknown',\n    slack_message: {\n      text: `${emoji} *Security Advisory Detected*`,\n      blocks: [\n        {\n          type: 'header',\n          text: {\n            type: 'plain_text',\n            text: `${emoji} ${advisory.severity?.toUpperCase()} Advisory`\n          }\n        },\n        {\n          type: 'section',\n          fields: [\n            { type: 'mrkdwn', text: `*Title:*\\n${advisory.summary || 'N/A'}` },\n            { type: 'mrkdwn', text: `*CVE ID:*\\n${advisory.cve_id || 'N/A'}` },\n            { type: 'mrkdwn', text: `*Severity:*\\n${advisory.severity || 'N/A'}` },\n            { type: 'mrkdwn', text: `*Published:*\\n${advisory.published_at || 'N/A'}` }\n          ]\n        },\n        {\n          type: 'actions',\n          elements: [\n            {\n              type: 'button',\n              text: { type: 'plain_text', text: 'View Advisory' },\n              url: advisory.html_url || 'https://github.com/advisories',\n              style: 'danger'\n            }\n          ]\n        }\n      ]\n    }\n  }\n};"
+      },
+      "id": "node-format",
+      "name": "Format Slack Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "notes": "Transforms raw GitHub advisory data into a structured Slack Block Kit message. Customize the emoji map or add fields here. Docs: https://api.slack.com/block-kit"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.slack_message) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "node-slack",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300],
+      "notes": "POSTs the formatted message to Slack via Incoming Webhook. URL is loaded from environment variable — never hardcoded. Docs: https://api.slack.com/messaging/webhooks"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log execution summary for audit trail\nconst now = new Date().toISOString();\nconst advisory = $input.item.json;\n\nconsole.log(JSON.stringify({\n  event: 'advisory_alert_sent',\n  timestamp: now,\n  severity: advisory.severity,\n  cve_id: advisory.cve_id,\n  status: 'success'\n}));\n\nreturn $input.item;"
+      },
+      "id": "node-log",
+      "name": "Log Execution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300],
+      "notes": "Writes a structured log entry for each alert sent. In production, pipe this to your SIEM or CloudWatch Logs. Useful for audit trails and compliance reporting."
+    }
+  ],
+  "connections": {
+    "Every 6 Hours": {
+      "main": [
+        [{ "node": "Fetch GitHub Advisories", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch GitHub Advisories": {
+      "main": [
+        [{ "node": "Filter: HIGH or CRITICAL Only", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filter: HIGH or CRITICAL Only": {
+      "main": [
+        [{ "node": "Format Slack Message", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Slack Message": {
+      "main": [
+        [{ "node": "Send Slack Alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Slack Alert": {
+      "main": [
+        [{ "node": "Log Execution", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "n8nVersion": "1.0.0"
+  },
+  "tags": ["devsecops", "security", "github", "slack", "starter"]
+}

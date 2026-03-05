@@ -1,0 +1,92 @@
+name: Validate N8N Workflows
+
+# ============================================================
+# Shift-Left Security Check
+# Validates workflow JSON files on every push and pull request.
+# Catches broken workflows before they reach production.
+# ============================================================
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'workflows/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'workflows/**'
+
+jobs:
+  validate-workflows:
+    name: Validate N8N Workflow JSON
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate all workflow JSON files
+        run: |
+          echo "🔍 Scanning workflows/ for JSON files..."
+          FAILED=0
+
+          for file in workflows/*.json; do
+            echo -n "  Checking $file ... "
+            if python3 -c "
+          import json, sys
+          with open('$file') as f:
+              data = json.load(f)
+
+          # Basic structural checks
+          required_keys = ['name', 'nodes', 'connections']
+          for key in required_keys:
+              if key not in data:
+                  print(f'FAIL: Missing required key: {key}')
+                  sys.exit(1)
+
+          if not isinstance(data['nodes'], list):
+              print('FAIL: nodes must be an array')
+              sys.exit(1)
+
+          # Check no hardcoded secrets (naive check)
+          content = open('$file').read()
+          suspicious = ['ghp_', 'sk-', 'hooks.slack.com/services/T']
+          for pattern in suspicious:
+              if pattern in content:
+                  print(f'FAIL: Possible hardcoded secret detected ({pattern})')
+                  sys.exit(1)
+
+          print('PASS')
+          "; then
+            echo "✅ PASS"
+          else
+            echo "❌ FAIL"
+            FAILED=1
+          fi
+          done
+
+          if [ $FAILED -ne 0 ]; then
+            echo ""
+            echo "❌ Workflow validation failed. Fix errors above before merging."
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ All workflow files passed validation."
+
+      - name: Check .env is not committed
+        run: |
+          if git ls-files | grep -q "^\.env$"; then
+            echo "❌ SECURITY FAIL: .env file is tracked by git!"
+            echo "   Run: git rm --cached .env && echo '.env' >> .gitignore"
+            exit 1
+          fi
+          echo "✅ No .env file committed."
+
+      - name: Check .env.example exists
+        run: |
+          if [ ! -f ".env.example" ]; then
+            echo "❌ .env.example is missing. Add it so contributors know what to configure."
+            exit 1
+          fi
+          echo "✅ .env.example found."
