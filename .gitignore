@@ -1,0 +1,23 @@
+# ============================================================
+# SECURITY: Never commit secrets or local state
+# ============================================================
+
+# Environment variables (CRITICAL - contains secrets)
+.env
+.env.local
+.env.*.local
+
+# N8N local data (contains encrypted credentials)
+.n8n/
+
+# Docker volumes (local runtime data)
+n8n_data/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor configs
+.vscode/
+.idea/
+*.swp
